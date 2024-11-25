@@ -1,6 +1,6 @@
-# Watson - A Discord Bot for Sherlock
+# Watson - A Matrix Bot for Sherlock
 
-Watson is a Discord bot designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Discord using the power of Sherlock.
+Watson is a Matrix bot designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Matrix using the power of Sherlock.
 
 ## Setup
 
@@ -20,19 +20,19 @@ git clone https://github.com/sherlock-project/sherlock
 cd sherlock
 ```
 
-2. Create a new directory named `discordbot`:
+2. Create a new directory named `Matrixbot`:
 
 ```bash
-mkdir discordbot
+mkdir Matrixbot
 ```
 
-3. Navigate to the `discordbot` directory:
+3. Navigate to the `Matrixbot` directory:
 
 ```bash
-cd discordbot
+cd Matrixbot
 ```
 
-4. Clone the Watson repository into the `discordbot` directory:
+4. Clone the Watson repository into the `Matrixbot` directory:
 
 ```bash
 git clone https://github.com/RocketGod-git/watson .
@@ -42,7 +42,7 @@ git clone https://github.com/RocketGod-git/watson .
 
 ```json
 {
-	"discord_bot_token": "REPLACE WITH YOUR BOT TOKEN"
+	"Matrix_bot_token": "REPLACE WITH YOUR BOT TOKEN"
 }
 ```
 
@@ -70,7 +70,7 @@ This script will perform the same setup actions as the Windows batch file.
 
 ## Usage
 
-Once the bot is running, you can utilize the following slash commands on your Discord server:
+Once the bot is running, you can utilize the following slash commands on your Matrix server:
 
 ### `/sherlock`
 
@@ -90,4 +90,4 @@ Displays a list of available commands and their descriptions.
 
 Thank you for using Watson! If you find any issues or have any feedback, feel free to contribute to the [Watson repository](https://github.com/RocketGod-git/watson).
 
-![RocketGod](https://github.com/RocketGod-git/shell-access-discord-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
+![RocketGod](https://github.com/RocketGod-git/shell-access-Matrix-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
