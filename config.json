@@ -1,3 +1,5 @@
 {
-    "discord_bot_token": "REPLACE WITH YOUR BOT TOKEN"
+    "homeserver": "https://matrix.org",
+    "username": "@your_bot:matrix.org",
+    "password": "your_bot_password"
 }
