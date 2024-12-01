@@ -1,33 +1,20 @@
-# __________                  __             __     ________             .___ 
-# \______   \  ____    ____  |  | __  ____ _/  |_  /  _____/   ____    __| _/ 
-#  |       _/ /  _ \ _/ ___\ |  |/ /_/ __ \\   __\/   \  ___  /  _ \  / __ |  
-#  |    |   \(  <_> )\  \___ |    < \  ___/ |  |  \    \_\  \(  <_> )/ /_/ |  
-#  |____|_  / \____/  \___  >|__|_ \ \___  >|__|   \______  / \____/ \____ |  
-#         \/              \/      \/     \/               \/              \/  
-#
-# Discord bot for Sherlock by RocketGod
-# https://github.com/RocketGod-git/watson
+# Bot for Sherlock by RocketGod
+# Modified for Matrix use by NeedNotApply
 
 import json
 import logging
-import platform
-import time
-import discord
-from discord import Embed
 import os
-import asyncio
 import sys
-from io import StringIO
+import asyncio
+from nio import (
+    AsyncClient,
+    MatrixRoom,
+    RoomMessageText,
+    LoginResponse,
+    InviteMemberEvent,
+    JoinError,
+)
 import subprocess
-
-class NoShardResumeFilter(logging.Filter):
-    def filter(self, record):
-        if 'discord.gateway' in record.name and 'has successfully RESUMED session' in record.msg:
-            return False
-        return True
-
-discord_gateway_logger = logging.getLogger('discord.gateway')
-discord_gateway_logger.addFilter(NoShardResumeFilter())
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,201 +26,177 @@ def load_config():
         logging.error(f"Error loading configuration: {e}")
         return None
 
-async def send_message_with_retry(channel, content, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            await channel.send(content)
-            return
-        except discord.errors.Forbidden:
-            logging.warning(f"Bot doesn't have permission to send messages in channel {channel.id}")
-            return
-        except discord.errors.HTTPException as e:
-            if attempt == max_retries - 1:
-                logging.error(f"Failed to send message after {max_retries} attempts: {e}")
-            else:
-                await asyncio.sleep(1)
+async def send_message(client, room_id, content):
+    await client.room_send(
+        room_id=room_id,
+        message_type="m.room.message",
+        content={
+            "msgtype": "m.text",
+            "body": content
+        }
+    )
 
-async def run_sherlock_process(args, channel, timeout=300):
+async def run_sherlock_process(args, timeout=300):
     sherlock_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sherlock_script = os.path.join(sherlock_dir, "sherlock.py")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = sherlock_dir
+
     process = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "sherlock.sherlock", *args,
+        sys.executable, sherlock_script, *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=sherlock_dir
+        cwd=sherlock_dir,
+        env=env
     )
-    
+
     try:
-        async def read_stream(stream):
-            output = []
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                line = line.decode().strip()
-                if line:
-                    await channel.send(line)
-                    output.append(line)
-            return '\n'.join(output)
-
-        stdout_task = asyncio.create_task(read_stream(process.stdout))
-        stderr_task = asyncio.create_task(read_stream(process.stderr))
-        wait_task = asyncio.create_task(process.wait())
-
-        done, pending = await asyncio.wait(
-            [stdout_task, stderr_task, wait_task],
-            timeout=timeout,
-            return_when=asyncio.ALL_COMPLETED
-        )
-
-        for task in pending:
-            task.cancel()
-
-        if wait_task not in done:
-            process.terminate()
-            return "", "Process timed out", -1
-
-        stdout = await stdout_task if stdout_task in done else ""
-        stderr = await stderr_task if stderr_task in done else ""
-        returncode = await wait_task
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        stdout = stdout_bytes.decode('utf-8', errors='replace')
+        stderr = stderr_bytes.decode('utf-8', errors='replace')
+        returncode = process.returncode
 
         return stdout, stderr, returncode
     except asyncio.TimeoutError:
-        process.terminate()
+        process.kill()
         return "", "Process timed out", -1
     except Exception as e:
         return "", f"An error occurred: {str(e)}", -1
 
-async def send_results_as_messages(interaction, filename):
-    try:
-        with open(filename, 'r') as f:
-            content = f.read()
-        
-        chunks = [content[i:i+1900] for i in range(0, len(content), 1900)]
-        
-        for chunk in chunks:
-            await interaction.followup.send(f"```\n{chunk}\n```")
-    except Exception as e:
-        await interaction.followup.send(f"Error sending results as messages: {str(e)}")
-
-async def execute_sherlock(interaction, *args):
-    if not args:
-        await handle_errors(interaction, "No username provided")
+async def execute_sherlock(client, room_id, user_id, username, similar=False):
+    if not username:
+        await handle_errors(client, room_id, "No username provided")
         return
 
-    username = args[0]
-    
     sherlock_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    filename = os.path.join(sherlock_dir, f"{username}.txt")
-    
-    await interaction.followup.send(f"Searching `{username}` for {interaction.user.mention}")
+    result_file = os.path.join(sherlock_dir, f"{username}.txt")
 
-    sherlock_args = [username, '--nsfw', '--output', filename, '--local']
+    search_type = "similar usernames of" if similar else "username"
+    await send_message(client, room_id, f"Searching {search_type} `{username}` for {user_id}")
+
+    sherlock_args = [
+        username,
+        '--nsfw',
+        '--print-found',
+        '--no-color',
+        '--timeout', '5',
+        '--output', result_file,
+        '--local',
+    ]
+
+    if similar:
+        sherlock_args.append('--similar')
 
     try:
-        stdout, stderr, returncode = await run_sherlock_process(sherlock_args, interaction.channel)
-        
+        stdout, stderr, returncode = await run_sherlock_process(sherlock_args)
+
         if returncode != 0:
             error_message = f"Sherlock exited with code {returncode}\n"
             if stderr:
                 error_message += f"Error output:\n```\n{stderr}\n```"
-            await handle_errors(interaction, error_message)
+            await handle_errors(client, room_id, error_message)
             return
 
-        if stderr:
-            await interaction.channel.send(f"Warnings occurred:\n```\n{stderr}\n```")
+        # Parse the results from stdout
+        results = []
+        for line in stdout.splitlines():
+            line = line.strip()
+            if line and line.startswith("[+]") and "Error" not in line:
+                # Extract the URL
+                url = line.split(maxsplit=1)[1]
+                results.append(url)
+
+        total_results = len(results)
+
+        await send_message(client, room_id, f"[*] Search completed with {total_results} results")
+
+        if results:
+            # Prepare the results message
+            results_text = "\n".join(results)
+            message = f"Results for `{username}`:\n```\n{results_text}\n```\nTotal Websites Username Detected On : {total_results}"
+            await send_message(client, room_id, message)
+        else:
+            await send_message(client, room_id, f"No results found for `{username}`.")
 
     except Exception as e:
-        await handle_errors(interaction, f"An error occurred while running Sherlock: {str(e)}")
+        await handle_errors(client, room_id, f"An error occurred while running Sherlock: {str(e)}")
         return
 
-    try:
-        if os.path.exists(filename):
-            file_size = os.path.getsize(filename)
-            if file_size > 8 * 1024 * 1024:
-                await interaction.channel.send(f"Results file for `{username}` is too large to upload (Size: {file_size / 1024 / 1024:.2f} MB). Sending results as text messages.")
-                await send_results_as_messages(interaction, filename)
-            else:
-                try:
-                    with open(filename, "rb") as f:
-                        await interaction.channel.send(file=discord.File(f, filename=os.path.basename(filename)))
-                except discord.HTTPException as e:
-                    await interaction.channel.send(f"Error uploading results file: {str(e)}. Sending results as text messages.")
-                    await send_results_as_messages(interaction, filename)
-        else:
-            await interaction.channel.send(f"No results file found for `{username}`")
-    except Exception as e:
-        await handle_errors(interaction, f"An error occurred while processing results: {str(e)}")
+    await send_message(client, room_id, f"Finished report on `{username}` for {user_id}")
 
-    await interaction.channel.send(f"Finished report on `{username}` for {interaction.user.mention}")
-
-class aclient(discord.Client):
-    def __init__(self) -> None:
-        super().__init__(intents=discord.Intents.default())
-        self.tree = discord.app_commands.CommandTree(self)
-        self.activity = discord.Activity(type=discord.ActivityType.watching, name="/sherlock")
-        self.discord_message_limit = 2000
-
-async def handle_errors(interaction, error, error_type="Error"):
+async def handle_errors(client, room_id, error, error_type="Error"):
     error_message = f"{error_type}: {error}"
-    logging.error(f"Error for user {interaction.user}: {error_message}")
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(error_message)
-        else:
-            await interaction.response.send_message(error_message, ephemeral=True)
-    except discord.HTTPException as http_err:
-        logging.warning(f"HTTP error while responding to {interaction.user}: {http_err}")
-        await interaction.followup.send(error_message)
-    except Exception as unexpected_err:
-        logging.error(f"Unexpected error while responding to {interaction.user}: {unexpected_err}")
-        await interaction.followup.send("An unexpected error occurred. Please try again later.")
-        
-def run_discord_bot(token):
-    client = aclient()
-    active_searches = {}
+    logging.error(f"Error: {error_message}")
+    await send_message(client, room_id, error_message)
 
-    @client.event
-    async def on_ready():
-        await client.tree.sync()
+async def main():
+    config = load_config()
+    if not config:
+        logging.error("Configuration could not be loaded. Exiting.")
+        return
 
-        logging.info(f"Bot {client.user} is ready and running in {len(client.guilds)} servers.")
-        for guild in client.guilds:
-            try:
-                owner = await guild.fetch_member(guild.owner_id)
-                owner_name = f"{owner.name}#{owner.discriminator}"
-            except Exception as e:
-                logging.error(f"Could not fetch owner for guild: {guild.name}, error: {e}")
-                owner_name = "Could not fetch owner"
-            
-            logging.info(f" - {guild.name} (Owner: {owner_name})")
+    client = AsyncClient(config["homeserver"], config["username"])
+    login_response = await client.login(config["password"])
 
-        server_count = len(client.guilds)
-        activity_text = f"/sherlock on {server_count} servers"
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=activity_text))
+    if isinstance(login_response, LoginResponse):
+        logging.info("Logged in successfully.")
+    else:
+        logging.error(f"Failed to login: {login_response}")
+        return
 
-        logging.info(f'{client.user} is online.')
+    # Define the message handler
+    async def message_callback(room, event):
+        if event.sender == client.user:
+            return  # Ignore messages from ourselves
 
-    @client.tree.command(name="sherlock", description="Search for a username on social networks using Sherlock")
-    async def sherlock(interaction: discord.Interaction, username: str):
-        await interaction.response.defer(ephemeral=False)  
-        
-        logging.info(f"User {interaction.user} from {interaction.guild if interaction.guild else 'DM'} executed '/sherlock' with username '{username}'.")
+        if isinstance(event, RoomMessageText):
+            message_content = event.body.strip()
+            sender = event.sender
 
-        formatted_username = username.replace("{", "{%}")
+            if message_content.startswith("!sherlock "):
+                args = message_content.split(maxsplit=1)
+                if len(args) < 2:
+                    await send_message(client, room.room_id, "Usage: !sherlock <username>")
+                    return
+                username = args[1]
+                await execute_sherlock(client, room.room_id, sender, username)
 
+            elif message_content.startswith("!sherlock-similar "):
+                args = message_content.split(maxsplit=1)
+                if len(args) < 2:
+                    await send_message(client, room.room_id, "Usage: !sherlock-similar <username>")
+                    return
+                username = args[1]
+                await execute_sherlock(client, room.room_id, sender, username, similar=True)
+
+            elif message_content.startswith("!help"):
+                help_message = (
+                    "Available commands:\n"
+                    "- `!sherlock <username>`: Search for the exact username on social networks.\n"
+                    "- `!sherlock-similar <username>`: Search for similar usernames on social networks.\n"
+                    "- `!help`: Display this help message."
+                )
+                await send_message(client, room.room_id, help_message)
+
+    # Define the invite handler
+    async def invite_callback(room, event):
+        logging.info(f"Received invite for room {room.room_id} from {event.sender}")
         try:
-            task = asyncio.create_task(execute_sherlock(interaction, formatted_username))
-            active_searches[username] = task
-            await task
-        except Exception as e:
-            await handle_errors(interaction, str(e))
-        finally:
-            if username in active_searches:
-                del active_searches[username]
-                
+            await client.join(room.room_id)
+            logging.info(f"Joined room {room.room_id}")
+        except JoinError as e:
+            logging.error(f"Failed to join room {room.room_id}: {e}")
 
-    client.run(token)
+    client.add_event_callback(message_callback, RoomMessageText)
+    client.add_event_callback(invite_callback, InviteMemberEvent)
+
+    logging.info("Starting sync loop...")
+    try:
+        await client.sync_forever(timeout=30000)  # milliseconds
+    except Exception as e:
+        logging.error(f"An error occurred during sync: {e}")
+    finally:
+        await client.close()
 
 if __name__ == "__main__":
-    config = load_config()
-    run_discord_bot(config.get("discord_bot_token"))
+    asyncio.get_event_loop().run_until_complete(main())
