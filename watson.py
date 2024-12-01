@@ -1,11 +1,13 @@
 # Bot for Sherlock by RocketGod
 # Modified for Matrix use by NeedNotApply
 
+
 import json
 import logging
 import os
 import sys
 import asyncio
+import re
 from nio import (
     AsyncClient,
     MatrixRoom,
@@ -36,6 +38,11 @@ async def send_message(client, room_id, content):
         }
     )
 
+def is_valid_username(username):
+    # Define allowed characters: letters, numbers, underscores, hyphens, periods
+    pattern = re.compile(r'^[A-Za-z0-9_\-\.]+$')
+    return bool(pattern.match(username))
+
 async def run_sherlock_process(args, timeout=300):
     sherlock_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sherlock_script = os.path.join(sherlock_dir, "sherlock.py")
@@ -61,18 +68,33 @@ async def run_sherlock_process(args, timeout=300):
         process.kill()
         return "", "Process timed out", -1
     except Exception as e:
-        return "", f"An error occurred: {str(e)}", -1
+        logging.error(f"Exception in run_sherlock_process: {e}", exc_info=True)
+        return "", "An internal error occurred while running Sherlock.", -1
 
 async def execute_sherlock(client, room_id, user_id, username, similar=False):
     if not username:
-        await handle_errors(client, room_id, "No username provided")
+        await send_message(client, room_id, "Error: No username provided.")
+        return
+
+    if not is_valid_username(username):
+        await send_message(
+            client, room_id,
+            "Error: The username contains invalid characters. "
+            "Allowed characters are letters, numbers, underscores (_), hyphens (-), and periods (.)"
+        )
         return
 
     sherlock_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     result_file = os.path.join(sherlock_dir, f"{username}.txt")
 
+    original_username = username  # Keep the original for messages
+
+    if similar:
+        # Replace '_', '-', '.' with '{?}' to search for similar usernames
+        username = username.replace('_', '{?}').replace('-', '{?}').replace('.', '{?}')
+
     search_type = "similar usernames of" if similar else "username"
-    await send_message(client, room_id, f"Searching {search_type} `{username}` for {user_id}")
+    await send_message(client, room_id, f"Searching {search_type} `{original_username}` for {user_id}")
 
     sherlock_args = [
         username,
@@ -84,17 +106,12 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
         '--local',
     ]
 
-    if similar:
-        sherlock_args.append('--similar')
-
     try:
         stdout, stderr, returncode = await run_sherlock_process(sherlock_args)
 
         if returncode != 0:
-            error_message = f"Sherlock exited with code {returncode}\n"
-            if stderr:
-                error_message += f"Error output:\n```\n{stderr}\n```"
-            await handle_errors(client, room_id, error_message)
+            logging.error(f"Sherlock exited with code {returncode}. Stderr: {stderr}")
+            await send_message(client, room_id, "An error occurred while running Sherlock. Please try again later.")
             return
 
         # Parse the results from stdout
@@ -113,21 +130,21 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
         if results:
             # Prepare the results message
             results_text = "\n".join(results)
-            message = f"Results for `{username}`:\n```\n{results_text}\n```\nTotal Websites Username Detected On : {total_results}"
+            message = (
+                f"Results for `{original_username}`:\n"
+                f"```\n{results_text}\n```\n"
+                f"Total Websites Username Detected On : {total_results}"
+            )
             await send_message(client, room_id, message)
         else:
-            await send_message(client, room_id, f"No results found for `{username}`.")
+            await send_message(client, room_id, f"No results found for `{original_username}`.")
 
     except Exception as e:
-        await handle_errors(client, room_id, f"An error occurred while running Sherlock: {str(e)}")
+        logging.error(f"Exception in execute_sherlock: {e}", exc_info=True)
+        await send_message(client, room_id, "An internal error occurred while processing your request.")
         return
 
-    await send_message(client, room_id, f"Finished report on `{username}` for {user_id}")
-
-async def handle_errors(client, room_id, error, error_type="Error"):
-    error_message = f"{error_type}: {error}"
-    logging.error(f"Error: {error_message}")
-    await send_message(client, room_id, error_message)
+    await send_message(client, room_id, f"Finished report on `{original_username}` for {user_id}")
 
 async def main():
     config = load_config()
@@ -153,30 +170,34 @@ async def main():
             message_content = event.body.strip()
             sender = event.sender
 
-            if message_content.startswith("!sherlock "):
-                args = message_content.split(maxsplit=1)
-                if len(args) < 2:
-                    await send_message(client, room.room_id, "Usage: !sherlock <username>")
-                    return
-                username = args[1]
-                await execute_sherlock(client, room.room_id, sender, username)
+            try:
+                if message_content.startswith("!sherlock "):
+                    args = message_content.split(maxsplit=1)
+                    if len(args) < 2:
+                        await send_message(client, room.room_id, "Usage: !sherlock <username>")
+                        return
+                    username = args[1]
+                    await execute_sherlock(client, room.room_id, sender, username)
 
-            elif message_content.startswith("!sherlock-similar "):
-                args = message_content.split(maxsplit=1)
-                if len(args) < 2:
-                    await send_message(client, room.room_id, "Usage: !sherlock-similar <username>")
-                    return
-                username = args[1]
-                await execute_sherlock(client, room.room_id, sender, username, similar=True)
+                elif message_content.startswith("!sherlock-similar "):
+                    args = message_content.split(maxsplit=1)
+                    if len(args) < 2:
+                        await send_message(client, room.room_id, "Usage: !sherlock-similar <username>")
+                        return
+                    username = args[1]
+                    await execute_sherlock(client, room.room_id, sender, username, similar=True)
 
-            elif message_content.startswith("!help"):
-                help_message = (
-                    "Available commands:\n"
-                    "- `!sherlock <username>`: Search for the exact username on social networks.\n"
-                    "- `!sherlock-similar <username>`: Search for similar usernames on social networks.\n"
-                    "- `!help`: Display this help message."
-                )
-                await send_message(client, room.room_id, help_message)
+                elif message_content.startswith("!help"):
+                    help_message = (
+                        "Available commands:\n"
+                        "- `!sherlock <username>`: Search for the exact username on social networks.\n"
+                        "- `!sherlock-similar <username>`: Search for similar usernames on social networks.\n"
+                        "- `!help`: Display this help message."
+                    )
+                    await send_message(client, room.room_id, help_message)
+            except Exception as e:
+                logging.error(f"Exception in message_callback: {e}", exc_info=True)
+                await send_message(client, room.room_id, "An error occurred while processing your command.")
 
     # Define the invite handler
     async def invite_callback(room, event):
@@ -194,7 +215,7 @@ async def main():
     try:
         await client.sync_forever(timeout=30000)  # milliseconds
     except Exception as e:
-        logging.error(f"An error occurred during sync: {e}")
+        logging.error(f"An error occurred during sync: {e}", exc_info=True)
     finally:
         await client.close()
 
