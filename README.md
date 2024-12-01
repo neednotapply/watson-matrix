@@ -1,6 +1,9 @@
 # Watson - A Matrix Bot for Sherlock
 
-Watson is a Matrix bot designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Matrix using the power of Sherlock.
+Watson is a Matrix bot designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Matrix using the power of Sherlock.  
+
+Created by [RocketGod](https://github.com/rocketgot-git/)  
+Modified for Matrix ecosystem by [NeedNotApply](https://github.com/neednotapply/)  
 
 ## Setup
 
@@ -14,80 +17,57 @@ git clone https://github.com/sherlock-project/sherlock
 
 ### Installation
 
-1. Navigate to the `sherlock` directory:
+1. Navigate to the `sherlock_project` directory:
 
 ```bash
 cd sherlock
+cd sherlock_project
 ```
 
-2. Create a new directory named `Matrixbot`:
+2. Clone the Watson repository into the `sherlock_project` directory:
 
 ```bash
-mkdir Matrixbot
+git clone https://github.com/neednotapply/watson-matrix
 ```
 
-3. Navigate to the `Matrixbot` directory:
-
-```bash
-cd Matrixbot
-```
-
-4. Clone the Watson repository into the `Matrixbot` directory:
-
-```bash
-git clone https://github.com/RocketGod-git/watson .
-```
-
-5. Update the `config.json` file with your bot's token. Your `config.json` should look like this:
+3. Update the `config.json` file with your bot's username and password.  
+   Optionally, change your bot's homeserver (where appropriate).  
+   Your `config.json` should look like this:
 
 ```json
 {
-	"Matrix_bot_token": "REPLACE WITH YOUR BOT TOKEN"
+    "homeserver": "https://matrix.org",
+    "username": "@your_bot:matrix.org",
+    "password": "your_bot_password"
 }
 ```
 
-### Running the Bot
-
-For **Windows** users:
-
-- Run the `run.bat` file. This will automatically set up a virtual environment, install the required packages on the first run, and then run the bot.
-
-- Execute the `run.sh` script:
+### Install the Prerequisites in Python
 
 ```bash
-./run.bat
+pip install matrix-nio aiohttp
 ```
 
-For **Linux** users:
+### Run the Bot
 
-- Execute the `run.sh` script:
+- Execute the `watson.py` script:
 
 ```bash
-./run.sh
+py watson.py
 ```
 
-This script will perform the same setup actions as the Windows batch file.
 
 ## Usage
 
-Once the bot is running, you can utilize the following slash commands on your Matrix server:
+Once the bot is running, you can utilize the following commands on your Matrix Room:
 
-### `/sherlock`
-
-Search for a username across various social networks using the Sherlock tool. By default, the search will include NSFW links.
-
-**Usage**:
-
-- `/sherlock [username]`: Search for a specific username.
-- **Options**:
-  - `similar`: Check for similar usernames by replacing them with variations (e.g., '_', '-', '.').
-
-### `/help`
-
-Displays a list of available commands and their descriptions.
+- `!sherlock [username]`: Search for a specific username.
+- `!sherlock-similar`: Check for similar usernames by replacing them with variations (e.g., '_', '-', '.').
+- `!help`: Displays a list of available commands and their descriptions.
 
 ---
 
 Thank you for using Watson! If you find any issues or have any feedback, feel free to contribute to the [Watson repository](https://github.com/RocketGod-git/watson).
 
-![RocketGod](https://github.com/RocketGod-git/shell-access-Matrix-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
+![RocketGod](https://github.com/RocketGod-git/)  
+![NeedNotApply](https://github.com/neednotapply/)
