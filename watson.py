@@ -170,7 +170,7 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
             def format_line(platform_label: str, url: str) -> str:
                 if platform == "discord":
                     link_text = platform_label or (urlsplit(url).netloc or url)
-                    return f"- [{link_text}]({url})\n"
+                    return f"- [{link_text}](<{url}>)\n"
 
                 return url + "\n"
 
