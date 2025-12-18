@@ -151,9 +151,12 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
         for line in stdout.splitlines():
             line = line.strip()
             if line and line.startswith("[+]") and "Error" not in line:
-                # Extract the URL
-                url = line.split(maxsplit=1)[1]
-                results.append(url)
+                # Extract the platform name and URL (format: "[+] platform: url")
+                content = line.split(maxsplit=1)[1]
+                platform_label, _, url = content.partition(": ")
+                platform_label = platform_label.strip()
+                url = (url or content).strip()
+                results.append((platform_label, url))
 
         total_results = len(results)
 
@@ -164,14 +167,14 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
             current_length = 0
             max_chunk_size = 1900
 
-            def format_line(url: str) -> str:
+            def format_line(platform_label: str, url: str) -> str:
                 if platform == "discord":
-                    hostname = urlsplit(url).netloc or url
-                    return f"- [{hostname}](<{url}>)\n"
+                    link_text = platform_label or (urlsplit(url).netloc or url)
+                    return f"- [{link_text}]({url})\n"
                 return url + "\n"
 
-            for url in results:
-                line = format_line(url)
+            for platform_label, url in results:
+                line = format_line(platform_label, url)
                 if current_length + len(line) > max_chunk_size:
                     await send_func("".join(chunk))
                     chunk = []
