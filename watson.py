@@ -8,6 +8,7 @@ import os
 import sys
 import asyncio
 import re
+from pathlib import Path
 from typing import Awaitable, Callable
 
 import discord
@@ -27,12 +28,35 @@ SendFunc = Callable[[str], Awaitable[None]]
 
 
 def load_config():
-    try:
-        with open('config.json', 'r') as file:
-            return json.load(file)
-    except Exception as e:
-        logging.error(f"Error loading configuration: {e}")
-        return None
+    script_dir = Path(__file__).resolve().parent
+    configured_path = os.environ.get("WATSON_CONFIG")
+
+    candidate_paths = []
+    if configured_path:
+        candidate_paths.append(Path(configured_path))
+
+    candidate_paths.append(script_dir / "config.json")
+
+    cwd_path = Path.cwd() / "config.json"
+    if cwd_path not in candidate_paths:
+        candidate_paths.append(cwd_path)
+
+    for path in candidate_paths:
+        try:
+            with path.open('r') as file:
+                logging.info(f"Loading configuration from {path}")
+                return json.load(file)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logging.error(f"Error loading configuration from {path}: {e}")
+            return None
+
+    logging.error(
+        "Error loading configuration. Tried: "
+        + ", ".join(str(path) for path in candidate_paths)
+    )
+    return None
 
 
 async def send_matrix_message(client, room_id, content):
