@@ -1,5 +1,10 @@
 {
-    "homeserver": "https://matrix.org",
-    "username": "@your_bot:matrix.org",
-    "password": "your_bot_password"
+    "matrix": {
+        "homeserver": "https://matrix.org",
+        "username": "@your_bot:matrix.org",
+        "password": "your_bot_password"
+    },
+    "discord": {
+        "token": "your_discord_bot_token"
+    }
 }
