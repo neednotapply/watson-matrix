@@ -1,6 +1,6 @@
-# Watson - A Matrix Bot for Sherlock
+# SherlockBot - A Matrix and Discord Bot for The Sherlock Project
 
-Watson is a Matrix bot designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Matrix using the power of Sherlock.  
+SherlockBot is designed to interface with the [Sherlock project](https://github.com/sherlock-project/sherlock). It allows users to search for usernames on various social networks directly from Matrix using the power of Sherlock.  
 
 Created by [RocketGod](https://github.com/rocketgot-git/)  
 Modified for Matrix ecosystem by [NeedNotApply](https://github.com/neednotapply/)  
