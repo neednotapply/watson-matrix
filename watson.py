@@ -10,6 +10,7 @@ import asyncio
 import re
 from pathlib import Path
 from typing import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import discord
 from discord import app_commands
@@ -103,7 +104,7 @@ async def run_sherlock_process(args, timeout=300):
         logging.error(f"Exception in run_sherlock_process: {e}", exc_info=True)
         return "", "An internal error occurred while running Sherlock.", -1
 
-async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False):
+async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False, platform: str = "matrix"):
     if not username:
         await send_func("Error: No username provided.")
         return
@@ -156,22 +157,23 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
 
         total_results = len(results)
 
-        await send_func(f"[*] Search completed with {total_results} results")
-
         if results:
-            await send_func(f"Results for `{original_username}`:")
+            await send_func(f"Found {total_results} result(s) for `{original_username}`:")
 
-            # Discord messages must be 2000 characters or fewer. Send
-            # results in multiple code blocks to avoid hitting that
-            # limit while keeping the formatting readable.
             chunk = []
             current_length = 0
-            max_chunk_size = 1900  # leave room for code fences
+            max_chunk_size = 1900
+
+            def format_line(url: str) -> str:
+                if platform == "discord":
+                    hostname = urlsplit(url).netloc or url
+                    return f"- [{hostname}](<{url}>)\n"
+                return url + "\n"
 
             for url in results:
-                line = url + "\n"
+                line = format_line(url)
                 if current_length + len(line) > max_chunk_size:
-                    await send_func("```\n" + "".join(chunk) + "```")
+                    await send_func("".join(chunk))
                     chunk = []
                     current_length = 0
 
@@ -179,9 +181,7 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
                 current_length += len(line)
 
             if chunk:
-                await send_func("```\n" + "".join(chunk) + "```")
-
-            await send_func(f"Total Websites Username Detected On : {total_results}")
+                await send_func("".join(chunk))
         else:
             await send_func(f"No results found for `{original_username}`.")
 
@@ -190,7 +190,6 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
         await send_func("An internal error occurred while processing your request.")
         return
 
-    await send_func(f"Finished report on `{original_username}` for {user_id}")
 
 async def start_matrix_bot(config):
     matrix_cfg = config.get("matrix", {})
@@ -315,6 +314,7 @@ async def start_discord_bot(config):
             username_arg,
             send_followup,
             similar=similar,
+            platform="discord",
         )
 
     @bot.tree.command(name="sherlock", description="Search for an exact username on social networks.")
