@@ -159,14 +159,29 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
         await send_func(f"[*] Search completed with {total_results} results")
 
         if results:
-            # Prepare the results message
-            results_text = "\n".join(results)
-            message = (
-                f"Results for `{original_username}`:\n"
-                f"```\n{results_text}\n```\n"
-                f"Total Websites Username Detected On : {total_results}"
-            )
-            await send_func(message)
+            await send_func(f"Results for `{original_username}`:")
+
+            # Discord messages must be 2000 characters or fewer. Send
+            # results in multiple code blocks to avoid hitting that
+            # limit while keeping the formatting readable.
+            chunk = []
+            current_length = 0
+            max_chunk_size = 1900  # leave room for code fences
+
+            for url in results:
+                line = url + "\n"
+                if current_length + len(line) > max_chunk_size:
+                    await send_func("```\n" + "".join(chunk) + "```")
+                    chunk = []
+                    current_length = 0
+
+                chunk.append(line)
+                current_length += len(line)
+
+            if chunk:
+                await send_func("```\n" + "".join(chunk) + "```")
+
+            await send_func(f"Total Websites Username Detected On : {total_results}")
         else:
             await send_func(f"No results found for `{original_username}`.")
 
