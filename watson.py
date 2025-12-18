@@ -126,7 +126,7 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
         username = username.replace('_', '{?}').replace('-', '{?}').replace('.', '{?}')
 
     search_type = "similar usernames of" if similar else "username"
-    await send_func(f"Searching {search_type} `{original_username}` for {user_id}")
+    search_header = f"Searching {search_type} `{original_username}` for {user_id}"
 
     sherlock_args = [
         username,
@@ -160,34 +160,47 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
 
         total_results = len(results)
 
-        if results:
-            await send_func(f"Found {total_results} result(s) for `{original_username}`:")
-
-            chunk = []
+        async def send_with_chunking(lines: list[str]):
+            chunk: list[str] = []
             current_length = 0
             max_chunk_size = 1900
 
-            def format_line(platform_label: str, url: str) -> str:
-                if platform == "discord":
-                    link_text = platform_label or (urlsplit(url).netloc or url)
-                    return f"- [{link_text}](<{url}>)\n"
+            for line in lines:
+                line_with_newline = line + "\n"
 
-                return url + "\n"
-
-            for platform_label, url in results:
-                line = format_line(platform_label, url)
-                if current_length + len(line) > max_chunk_size:
+                if current_length + len(line_with_newline) > max_chunk_size and chunk:
                     await send_func("".join(chunk))
                     chunk = []
                     current_length = 0
 
-                chunk.append(line)
-                current_length += len(line)
+                chunk.append(line_with_newline)
+                current_length += len(line_with_newline)
 
             if chunk:
                 await send_func("".join(chunk))
+
+        if results:
+            footer = f"Found {total_results} result(s) for `{original_username}`."
+
+            def format_line(platform_label: str, url: str) -> str:
+                if platform == "discord":
+                    link_text = platform_label or (urlsplit(url).netloc or url)
+                    return f"- [{link_text}](<{url}>)"
+
+                return url
+
+            lines_to_send = [search_header, ""]
+
+            for platform_label, url in results:
+                lines_to_send.append(format_line(platform_label, url))
+
+            lines_to_send.extend(["", footer])
+            await send_with_chunking(lines_to_send)
         else:
-            await send_func(f"No results found for `{original_username}`.")
+            await send_with_chunking([
+                search_header,
+                f"No results found for `{original_username}`.",
+            ])
 
     except Exception as e:
         logging.error(f"Exception in execute_sherlock: {e}", exc_info=True)
