@@ -167,7 +167,7 @@ async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False
             def format_line(url: str) -> str:
                 if platform == "discord":
                     hostname = urlsplit(url).netloc or url
-                    return f"- [{hostname}](<{url}>)\n"
+                    return f"- [{hostname}]({url})\n"
                 return url + "\n"
 
             for url in results:
