@@ -8,17 +8,23 @@ import os
 import sys
 import asyncio
 import re
+from typing import Awaitable, Callable
+
+import discord
+from discord import app_commands
+from discord.ext import commands
 from nio import (
     AsyncClient,
-    MatrixRoom,
     RoomMessageText,
     LoginResponse,
     InviteMemberEvent,
     JoinError,
 )
-import subprocess
 
 logging.basicConfig(level=logging.INFO)
+
+SendFunc = Callable[[str], Awaitable[None]]
+
 
 def load_config():
     try:
@@ -28,7 +34,8 @@ def load_config():
         logging.error(f"Error loading configuration: {e}")
         return None
 
-async def send_message(client, room_id, content):
+
+async def send_matrix_message(client, room_id, content):
     await client.room_send(
         room_id=room_id,
         message_type="m.room.message",
@@ -37,6 +44,7 @@ async def send_message(client, room_id, content):
             "body": content
         }
     )
+
 
 def is_valid_username(username):
     # Define allowed characters: letters, numbers, underscores, hyphens, periods
@@ -71,14 +79,13 @@ async def run_sherlock_process(args, timeout=300):
         logging.error(f"Exception in run_sherlock_process: {e}", exc_info=True)
         return "", "An internal error occurred while running Sherlock.", -1
 
-async def execute_sherlock(client, room_id, user_id, username, similar=False):
+async def execute_sherlock(user_id, username, send_func: SendFunc, similar=False):
     if not username:
-        await send_message(client, room_id, "Error: No username provided.")
+        await send_func("Error: No username provided.")
         return
 
     if not is_valid_username(username):
-        await send_message(
-            client, room_id,
+        await send_func(
             "Error: The username contains invalid characters. "
             "Allowed characters are letters, numbers, underscores (_), hyphens (-), and periods (.)"
         )
@@ -94,7 +101,7 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
         username = username.replace('_', '{?}').replace('-', '{?}').replace('.', '{?}')
 
     search_type = "similar usernames of" if similar else "username"
-    await send_message(client, room_id, f"Searching {search_type} `{original_username}` for {user_id}")
+    await send_func(f"Searching {search_type} `{original_username}` for {user_id}")
 
     sherlock_args = [
         username,
@@ -111,7 +118,7 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
 
         if returncode != 0:
             logging.error(f"Sherlock exited with code {returncode}. Stderr: {stderr}")
-            await send_message(client, room_id, "An error occurred while running Sherlock. Please try again later.")
+            await send_func("An error occurred while running Sherlock. Please try again later.")
             return
 
         # Parse the results from stdout
@@ -125,7 +132,7 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
 
         total_results = len(results)
 
-        await send_message(client, room_id, f"[*] Search completed with {total_results} results")
+        await send_func(f"[*] Search completed with {total_results} results")
 
         if results:
             # Prepare the results message
@@ -135,33 +142,36 @@ async def execute_sherlock(client, room_id, user_id, username, similar=False):
                 f"```\n{results_text}\n```\n"
                 f"Total Websites Username Detected On : {total_results}"
             )
-            await send_message(client, room_id, message)
+            await send_func(message)
         else:
-            await send_message(client, room_id, f"No results found for `{original_username}`.")
+            await send_func(f"No results found for `{original_username}`.")
 
     except Exception as e:
         logging.error(f"Exception in execute_sherlock: {e}", exc_info=True)
-        await send_message(client, room_id, "An internal error occurred while processing your request.")
+        await send_func("An internal error occurred while processing your request.")
         return
 
-    await send_message(client, room_id, f"Finished report on `{original_username}` for {user_id}")
+    await send_func(f"Finished report on `{original_username}` for {user_id}")
 
-async def main():
-    config = load_config()
-    if not config:
-        logging.error("Configuration could not be loaded. Exiting.")
+async def start_matrix_bot(config):
+    matrix_cfg = config.get("matrix", {})
+    homeserver = matrix_cfg.get("homeserver") or config.get("homeserver")
+    username = matrix_cfg.get("username") or config.get("username")
+    password = matrix_cfg.get("password") or config.get("password")
+
+    if not all([homeserver, username, password]):
+        logging.info("Matrix configuration incomplete. Skipping Matrix bot startup.")
         return
 
-    client = AsyncClient(config["homeserver"], config["username"])
-    login_response = await client.login(config["password"])
+    client = AsyncClient(homeserver, username)
+    login_response = await client.login(password)
 
     if isinstance(login_response, LoginResponse):
-        logging.info("Logged in successfully.")
+        logging.info("Logged in to Matrix successfully.")
     else:
-        logging.error(f"Failed to login: {login_response}")
+        logging.error(f"Failed to login to Matrix: {login_response}")
         return
 
-    # Define the message handler
     async def message_callback(room, event):
         if event.sender == client.user:
             return  # Ignore messages from ourselves
@@ -174,18 +184,23 @@ async def main():
                 if message_content.startswith("!sherlock "):
                     args = message_content.split(maxsplit=1)
                     if len(args) < 2:
-                        await send_message(client, room.room_id, "Usage: !sherlock <username>")
+                        await send_matrix_message(client, room.room_id, "Usage: !sherlock <username>")
                         return
-                    username = args[1]
-                    await execute_sherlock(client, room.room_id, sender, username)
+                    username_arg = args[1]
+                    await execute_sherlock(sender, username_arg, lambda m: send_matrix_message(client, room.room_id, m))
 
                 elif message_content.startswith("!sherlock-similar "):
                     args = message_content.split(maxsplit=1)
                     if len(args) < 2:
-                        await send_message(client, room.room_id, "Usage: !sherlock-similar <username>")
+                        await send_matrix_message(client, room.room_id, "Usage: !sherlock-similar <username>")
                         return
-                    username = args[1]
-                    await execute_sherlock(client, room.room_id, sender, username, similar=True)
+                    username_arg = args[1]
+                    await execute_sherlock(
+                        sender,
+                        username_arg,
+                        lambda m: send_matrix_message(client, room.room_id, m),
+                        similar=True,
+                    )
 
                 elif message_content.startswith("!help"):
                     help_message = (
@@ -194,12 +209,11 @@ async def main():
                         "- `!sherlock-similar <username>`: Search for similar usernames on social networks.\n"
                         "- `!help`: Display this help message."
                     )
-                    await send_message(client, room.room_id, help_message)
+                    await send_matrix_message(client, room.room_id, help_message)
             except Exception as e:
-                logging.error(f"Exception in message_callback: {e}", exc_info=True)
-                await send_message(client, room.room_id, "An error occurred while processing your command.")
+                logging.error(f"Exception in Matrix message_callback: {e}", exc_info=True)
+                await send_matrix_message(client, room.room_id, "An error occurred while processing your command.")
 
-    # Define the invite handler
     async def invite_callback(room, event):
         logging.info(f"Received invite for room {room.room_id} from {event.sender}")
         try:
@@ -211,13 +225,115 @@ async def main():
     client.add_event_callback(message_callback, RoomMessageText)
     client.add_event_callback(invite_callback, InviteMemberEvent)
 
-    logging.info("Starting sync loop...")
+    logging.info("Starting Matrix sync loop...")
     try:
         await client.sync_forever(timeout=30000)  # milliseconds
+    except asyncio.CancelledError:
+        logging.info("Matrix bot task cancelled. Shutting down Matrix client.")
     except Exception as e:
-        logging.error(f"An error occurred during sync: {e}", exc_info=True)
+        logging.error(f"An error occurred during Matrix sync: {e}", exc_info=True)
     finally:
         await client.close()
+
+
+async def start_discord_bot(config):
+    discord_cfg = config.get("discord", {})
+    token = discord_cfg.get("token") or config.get("discord_token")
+
+    if not token:
+        logging.info("Discord token not provided. Skipping Discord bot startup.")
+        return
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+
+    bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents, help_command=None)
+
+    @bot.event
+    async def on_ready():
+        try:
+            synced = await bot.tree.sync()
+            logging.info(f"Logged in to Discord as {bot.user}. Synced {len(synced)} slash commands.")
+        except Exception as sync_error:
+            logging.error(f"Logged in to Discord as {bot.user} but failed to sync commands: {sync_error}")
+
+    async def run_sherlock(interaction: discord.Interaction, username_arg: str | None, similar: bool = False):
+        if not username_arg:
+            command_name = "sherlock-similar" if similar else "sherlock"
+            await interaction.response.send_message(
+                f"Usage: /{command_name} <username>",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        async def send_followup(message: str):
+            await interaction.followup.send(message)
+
+        await execute_sherlock(
+            interaction.user.mention,
+            username_arg,
+            send_followup,
+            similar=similar,
+        )
+
+    @bot.tree.command(name="sherlock", description="Search for an exact username on social networks.")
+    @app_commands.describe(username="The username to search for.")
+    async def sherlock_command(interaction: discord.Interaction, username: str):
+        await run_sherlock(interaction, username)
+
+    @bot.tree.command(name="sherlock-similar", description="Search for similar usernames on social networks.")
+    @app_commands.describe(username="The username to search for similar matches.")
+    async def sherlock_similar_command(interaction: discord.Interaction, username: str):
+        await run_sherlock(interaction, username, similar=True)
+
+    @bot.tree.command(name="help", description="List available Watson commands.")
+    async def help_command(interaction: discord.Interaction):
+        help_message = (
+            "Available commands:\n"
+            "- `/sherlock <username>`: Search for the exact username on social networks.\n"
+            "- `/sherlock-similar <username>`: Search for similar usernames on social networks.\n"
+            "- `/help`: Display this help message."
+        )
+        await interaction.response.send_message(help_message, ephemeral=True)
+
+    await bot.start(token)
+
+
+async def main():
+    config = load_config()
+    if not config:
+        logging.error("Configuration could not be loaded. Exiting.")
+        return
+
+    matrix_cfg = config.get("matrix", {})
+    has_matrix = all(
+        matrix_cfg.get(key)
+        or config.get(key)
+        for key in ["homeserver", "username", "password"]
+    )
+
+    discord_cfg = config.get("discord", {})
+    has_discord = bool(discord_cfg.get("token") or config.get("discord_token"))
+
+    tasks = []
+    if has_matrix:
+        tasks.append(asyncio.create_task(start_matrix_bot(config)))
+    else:
+        logging.info("Matrix configuration missing. Provide homeserver, username, and password to enable Matrix support.")
+
+    if has_discord:
+        tasks.append(asyncio.create_task(start_discord_bot(config)))
+    else:
+        logging.info("Discord configuration missing. Provide discord_token to enable Discord support.")
+
+    if not tasks:
+        logging.error("No bot services configured. Please provide Matrix and/or Discord credentials in config.json.")
+        return
+
+    await asyncio.gather(*tasks)
+
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(main())

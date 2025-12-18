@@ -30,22 +30,27 @@ cd sherlock_project
 git clone https://github.com/neednotapply/watson-matrix
 ```
 
-3. Update the `config.json` file with your bot's username and password.  
-   Optionally, change your bot's homeserver (where appropriate).  
-   Your `config.json` should look like this:
+3. Update the `config.json` file with your Matrix and optional Discord settings.
+   The Matrix keys are grouped together to avoid confusion. Your `config.json`
+   should look like this:
 
 ```json
 {
-    "homeserver": "https://matrix.org",
-    "username": "@your_bot:matrix.org",
-    "password": "your_bot_password"
+    "matrix": {
+        "homeserver": "https://matrix.org",
+        "username": "@your_bot:matrix.org",
+        "password": "your_bot_password"
+    },
+    "discord": {
+        "token": "your_discord_bot_token"
+    }
 }
 ```
 
 ### Install the Prerequisites in Python
 
 ```bash
-pip install matrix-nio aiohttp
+pip install matrix-nio aiohttp discord.py
 ```
 
 ### Run the Bot
@@ -56,6 +61,10 @@ pip install matrix-nio aiohttp
 py watson.py
 ```
 
+With both Matrix and Discord credentials in `config.json`, Watson will connect
+to both platforms simultaneously. Matrix uses `!` commands, and Discord exposes
+slash commands once the bot starts.
+
 
 ## Usage
 
@@ -64,6 +73,12 @@ Once the bot is running, you can utilize the following commands on your Matrix R
 - `!sherlock [username]`: Search for a specific username.
 - `!sherlock-similar`: Check for similar usernames by replacing them with variations (e.g., '_', '-', '.').
 - `!help`: Displays a list of available commands and their descriptions.
+
+On Discord, Watson registers slash commands instead of prefix commands:
+
+- `/sherlock <username>`: Search for a specific username.
+- `/sherlock-similar <username>`: Check for similar usernames with variations.
+- `/help`: Lists available Watson commands.
 
 ---
 
